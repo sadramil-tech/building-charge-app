@@ -62,16 +62,48 @@ with tab1:
         )
         conn.commit()
         st.success("هزینه ثبت شد ✅")
-        st.rerun()
+        st.experimental_rerun()
 
-    # نمایش هزینه‌های ماه
+    # نمایش هزینه‌های ماه با امکان انتخاب برای ویرایش/حذف
     df_exp = pd.read_sql_query(
         "SELECT * FROM expenses WHERE month=?",
         conn,
         params=(month_selected,)
     )
 
-    st.dataframe(df_exp)
+    if not df_exp.empty:
+        st.subheader("لیست هزینه‌های ماه")
+        selected_id = st.selectbox("انتخاب هزینه برای ویرایش/حذف", df_exp["id"])
+        selected_row = df_exp[df_exp["id"] == selected_id].iloc[0]
+
+        st.write("جزئیات هزینه انتخاب شده:")
+        st.write(selected_row)
+
+        # ویرایش هزینه
+        with st.form("edit_form"):
+            new_date = st.text_input("تاریخ شمسی", value=selected_row["date"])
+            new_type = st.text_input("نوع هزینه", value=selected_row["type"])
+            new_amount = st.number_input("مبلغ کل", min_value=0, value=selected_row["amount"])
+            edit_submit = st.form_submit_button("ویرایش هزینه")
+
+        if edit_submit:
+            new_share = new_amount / NUM_UNITS
+            cursor.execute(
+                "UPDATE expenses SET date=?, type=?, amount=?, share=? WHERE id=?",
+                (new_date, new_type, new_amount, new_share, selected_id)
+            )
+            conn.commit()
+            st.success("هزینه ویرایش شد ✅")
+            st.experimental_rerun()
+
+        # حذف هزینه
+        if st.button("حذف هزینه"):
+            cursor.execute("DELETE FROM expenses WHERE id=?", (selected_id,))
+            conn.commit()
+            st.success("هزینه حذف شد ✅")
+            st.experimental_rerun()
+
+        st.dataframe(df_exp)
 
 # ================== تب پرداخت ==================
 with tab2:
@@ -87,15 +119,46 @@ with tab2:
         )
         conn.commit()
         st.success("پرداخت ثبت شد ✅")
-        st.rerun()
+        st.experimental_rerun()
 
+    # نمایش پرداخت‌ها و انتخاب برای ویرایش/حذف
     df_pay = pd.read_sql_query(
         "SELECT * FROM payments WHERE month=?",
         conn,
         params=(month_selected,)
     )
 
-    st.dataframe(df_pay)
+    if not df_pay.empty:
+        st.subheader("لیست پرداخت‌های ماه")
+        selected_pay_id = st.selectbox("انتخاب پرداخت برای ویرایش/حذف", df_pay["id"])
+        selected_pay_row = df_pay[df_pay["id"] == selected_pay_id].iloc[0]
+
+        st.write("جزئیات پرداخت انتخاب شده:")
+        st.write(selected_pay_row)
+
+        # ویرایش پرداخت
+        with st.form("edit_pay_form"):
+            new_unit = st.selectbox("واحد", unit_names, index=unit_names.index(selected_pay_row["unit"]))
+            new_amount = st.number_input("مبلغ پرداختی", min_value=0, value=selected_pay_row["amount"])
+            edit_pay_submit = st.form_submit_button("ویرایش پرداخت")
+
+        if edit_pay_submit:
+            cursor.execute(
+                "UPDATE payments SET unit=?, amount=? WHERE id=?",
+                (new_unit, new_amount, selected_pay_id)
+            )
+            conn.commit()
+            st.success("پرداخت ویرایش شد ✅")
+            st.experimental_rerun()
+
+        # حذف پرداخت
+        if st.button("حذف پرداخت"):
+            cursor.execute("DELETE FROM payments WHERE id=?", (selected_pay_id,))
+            conn.commit()
+            st.success("پرداخت حذف شد ✅")
+            st.experimental_rerun()
+
+        st.dataframe(df_pay)
 
 # ================== گزارش کلی ==================
 with tab3:
