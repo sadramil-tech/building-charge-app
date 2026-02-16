@@ -1,8 +1,9 @@
 # فایل: app.py
 
 import streamlit as st
-import sqlite3
 import pandas as pd
+import psycopg2
+import os
 
 st.set_page_config(page_title="مدیریت شارژ ساختمان", layout="wide")
 st.title("💰 سیستم مدیریت شارژ ساختمان")
@@ -14,7 +15,9 @@ months = ["فروردین","اردیبهشت","خرداد","تیر","مرداد"
 
 # ------------------ اتصال دیتابیس ------------------
 
-conn = sqlite3.connect("building.db", check_same_thread=False)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
 # ایجاد جدول‌ها در صورت نبودن
@@ -206,3 +209,4 @@ with tab3:
         st.success(f"موجودی صندوق: {balance:,.0f}")
     else:
         st.error(f"کسری صندوق: {balance:,.0f}")
+
