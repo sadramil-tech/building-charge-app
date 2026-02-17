@@ -1,4 +1,4 @@
-# فایل: app.py
+# app.py - سیستم مدیریت شارژ ساختمان (اصلاح‌شده - بدون KeyError)
 
 import streamlit as st
 import pandas as pd
@@ -8,205 +8,204 @@ import os
 st.set_page_config(page_title="مدیریت شارژ ساختمان", layout="wide")
 st.title("💰 سیستم مدیریت شارژ ساختمان")
 
+# ثابت‌ها
 NUM_UNITS = 10
-unit_names = [f"واحد {i+1}" for i in range(NUM_UNITS)]
-months = ["فروردین","اردیبهشت","خرداد","تیر","مرداد","شهریور",
-          "مهر","آبان","آذر","دی","بهمن","اسفند"]
+UNIT_NAMES = [f"واحد {i+1}" for i in range(NUM_UNITS)]
+MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+          "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
 
-# ------------------ اتصال دیتابیس ------------------
-
+# اتصال به دیتابیس
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
-# ایجاد جدول‌ها در صورت نبودن
-cursor.execute("""
+# ایجاد جدول‌ها
+cursor.executescript("""
 CREATE TABLE IF NOT EXISTS expenses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    month TEXT,
-    date TEXT,
-    type TEXT,
-    amount INTEGER,
-    share REAL
-)
-""")
+    month TEXT NOT NULL,
+    date TEXT NOT NULL,
+    type TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    share REAL NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 
-cursor.execute("""
 CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    month TEXT,
-    unit TEXT,
-    amount INTEGER
-)
+    month TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """)
-
 conn.commit()
 
-month_selected = st.sidebar.selectbox("انتخاب ماه", months)
+# انتخاب ماه
+month_selected = st.sidebar.selectbox("ماه مورد نظر", MONTHS, index=MONTHS.index("بهمن"))
 
-tab1, tab2, tab3 = st.tabs(["ثبت هزینه","ثبت پرداخت","گزارش کلی"])
+tab1, tab2, tab3 = st.tabs(["ثبت هزینه", "ثبت پرداخت", "گزارش کلی"])
 
-# ================== تب هزینه ==================
+# ── تب ۱: هزینه‌ها ───────────────────────────────────────────
 with tab1:
-    st.header("ثبت هزینه")
+    st.header("ثبت هزینه جدید")
 
-    with st.form("expense_form"):
-        date_shamsi = st.text_input("تاریخ شمسی")
-        expense_type = st.text_input("نوع هزینه")
-        amount = st.number_input("مبلغ کل", min_value=0)
-        submit = st.form_submit_button("ثبت")
+    with st.form("expense_form", clear_on_submit=True):
+        col1, col2, col3 = st.columns([2, 4, 3])
+        with col1: date_input = st.text_input("تاریخ (مثال: ۱۴۰۴/۱۱/۱۹)")
+        with col2: exp_type   = st.text_input("شرح هزینه")
+        with col3: amount     = st.number_input("مبلغ کل (تومان)", min_value=0, step=5000)
 
-    if submit and amount > 0:
-        share = amount / NUM_UNITS
-        cursor.execute(
-            "INSERT INTO expenses (month,date,type,amount,share) VALUES (?,?,?,?,?)",
-            (month_selected, date_shamsi, expense_type, amount, share)
-        )
-        conn.commit()
-        st.success("هزینه ثبت شد ✅")
-        st.experimental_rerun()
+        if st.form_submit_button("ثبت هزینه", type="primary"):
+            if date_input.strip() and exp_type.strip() and amount > 0:
+                share = amount / NUM_UNITS
+                cursor.execute(
+                    "INSERT INTO expenses (month, date, type, amount, share) VALUES (?,?,?,?,?)",
+                    (month_selected, date_input.strip(), exp_type.strip(), int(amount), share)
+                )
+                conn.commit()
+                st.success("ثبت شد", icon="✅")
+                st.rerun()
+            else:
+                st.error("فیلدهای ضروری را پر کنید")
 
-    # نمایش هزینه‌های ماه با امکان انتخاب برای ویرایش/حذف
     df_exp = pd.read_sql_query(
-        "SELECT * FROM expenses WHERE month=?",
-        conn,
-        params=(month_selected,)
+        "SELECT id, date, type, amount, share FROM expenses WHERE month = ? ORDER BY id DESC",
+        conn, params=(month_selected,)
     )
 
     if not df_exp.empty:
-        st.subheader("لیست هزینه‌های ماه")
-        selected_id = st.selectbox("انتخاب هزینه برای ویرایش/حذف", df_exp["id"])
-        selected_row = df_exp[df_exp["id"] == selected_id].iloc[0]
+        st.subheader(f"هزینه‌های {month_selected}")
+        options = ["─ انتخاب ─"] + [f"{r.id} | {r.date} | {r.type} | {r.amount:,.0f}" for r in df_exp.itertuples()]
+        selected = st.selectbox("ویرایش / حذف", options)
 
-        st.write("جزئیات هزینه انتخاب شده:")
-        st.write(selected_row)
+        if selected != "─ انتخاب ─":
+            sel_id = int(selected.split(" | ")[0])
+            row = df_exp[df_exp["id"] == sel_id].iloc[0]
 
-        # ویرایش هزینه
-        with st.form("edit_form"):
-            new_date = st.text_input("تاریخ شمسی", value=selected_row["date"])
-            new_type = st.text_input("نوع هزینه", value=selected_row["type"])
-            new_amount = st.number_input("مبلغ کل", min_value=0, value=selected_row["amount"])
-            edit_submit = st.form_submit_button("ویرایش هزینه")
+            with st.form("edit_exp"):
+                col1e, col2e, col3e = st.columns([2,4,3])
+                with col1e: edit_date   = st.text_input("تاریخ", value=row["date"])
+                with col2e: edit_type   = st.text_input("شرح",   value=row["type"])
+                with col3e: edit_amount = st.number_input("مبلغ", value=int(row["amount"]), step=5000)
 
-        if edit_submit:
-            new_share = new_amount / NUM_UNITS
-            cursor.execute(
-                "UPDATE expenses SET date=?, type=?, amount=?, share=? WHERE id=?",
-                (new_date, new_type, new_amount, new_share, selected_id)
-            )
-            conn.commit()
-            st.success("هزینه ویرایش شد ✅")
-            st.experimental_rerun()
+                colb1, colb2 = st.columns(2)
+                with colb1:
+                    if st.form_submit_button("ذخیره", type="primary"):
+                        new_share = edit_amount / NUM_UNITS
+                        cursor.execute(
+                            "UPDATE expenses SET date=?, type=?, amount=?, share=? WHERE id=?",
+                            (edit_date.strip(), edit_type.strip(), int(edit_amount), new_share, sel_id)
+                        )
+                        conn.commit()
+                        st.rerun()
+                with colb2:
+                    if st.form_submit_button("حذف", type="secondary"):
+                        cursor.execute("DELETE FROM expenses WHERE id=?", (sel_id,))
+                        conn.commit()
+                        st.rerun()
 
-        # حذف هزینه
-        if st.button("حذف هزینه"):
-            cursor.execute("DELETE FROM expenses WHERE id=?", (selected_id,))
-            conn.commit()
-            st.success("هزینه حذف شد ✅")
-            st.experimental_rerun()
+        st.dataframe(df_exp.style.format({"amount":"{:,}","share":"{:,}"}))
 
-        st.dataframe(df_exp)
-
-# ================== تب پرداخت ==================
+# ── تب ۲: پرداخت‌ها ──────────────────────────────────────────
 with tab2:
     st.header("ثبت پرداخت")
 
-    unit = st.selectbox("واحد", unit_names)
-    pay_amount = st.number_input("مبلغ پرداختی", min_value=0)
+    colu, cola = st.columns([3,2])
+    with colu: unit = st.selectbox("واحد", UNIT_NAMES)
+    with cola: pay_amount = st.number_input("مبلغ (تومان)", min_value=0, step=10000)
 
-    if st.button("ثبت پرداخت"):
-        cursor.execute(
-            "INSERT INTO payments (month,unit,amount) VALUES (?,?,?)",
-            (month_selected, unit, pay_amount)
-        )
-        conn.commit()
-        st.success("پرداخت ثبت شد ✅")
-        st.experimental_rerun()
+    if st.button("ثبت پرداخت", type="primary"):
+        if pay_amount > 0:
+            cursor.execute(
+                "INSERT INTO payments (month, unit, amount) VALUES (?,?,?)",
+                (month_selected, unit, int(pay_amount))
+            )
+            conn.commit()
+            st.success("ثبت شد")
+            st.rerun()
+        else:
+            st.warning("مبلغ باید مثبت باشد")
 
-    # نمایش پرداخت‌ها و انتخاب برای ویرایش/حذف
     df_pay = pd.read_sql_query(
-        "SELECT * FROM payments WHERE month=?",
-        conn,
-        params=(month_selected,)
+        "SELECT id, unit, amount FROM payments WHERE month = ? ORDER BY id DESC",
+        conn, params=(month_selected,)
     )
 
     if not df_pay.empty:
-        st.subheader("لیست پرداخت‌های ماه")
-        selected_pay_id = st.selectbox("انتخاب پرداخت برای ویرایش/حذف", df_pay["id"])
-        selected_pay_row = df_pay[df_pay["id"] == selected_pay_id].iloc[0]
+        st.subheader(f"پرداخت‌های {month_selected}")
+        pay_opts = ["─ انتخاب ─"] + [f"{r.id} | {r.unit} | {r.amount:,.0f}" for r in df_pay.itertuples()]
+        selp = st.selectbox("ویرایش/حذف پرداخت", pay_opts)
 
-        st.write("جزئیات پرداخت انتخاب شده:")
-        st.write(selected_pay_row)
+        if selp != "─ انتخاب ─":
+            pid = int(selp.split(" | ")[0])
+            prow = df_pay[df_pay["id"] == pid].iloc[0]
 
-        # ویرایش پرداخت
-        with st.form("edit_pay_form"):
-            new_unit = st.selectbox("واحد", unit_names, index=unit_names.index(selected_pay_row["unit"]))
-            new_amount = st.number_input("مبلغ پرداختی", min_value=0, value=selected_pay_row["amount"])
-            edit_pay_submit = st.form_submit_button("ویرایش پرداخت")
+            with st.form("edit_pay"):
+                new_unit = st.selectbox("واحد", UNIT_NAMES, index=UNIT_NAMES.index(prow["unit"]))
+                new_amnt = st.number_input("مبلغ", value=int(prow["amount"]), step=10000)
 
-        if edit_pay_submit:
-            cursor.execute(
-                "UPDATE payments SET unit=?, amount=? WHERE id=?",
-                (new_unit, new_amount, selected_pay_id)
-            )
-            conn.commit()
-            st.success("پرداخت ویرایش شد ✅")
-            st.experimental_rerun()
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.form_submit_button("ذخیره", type="primary"):
+                        cursor.execute("UPDATE payments SET unit=?, amount=? WHERE id=?", (new_unit, int(new_amnt), pid))
+                        conn.commit()
+                        st.rerun()
+                with c2:
+                    if st.form_submit_button("حذف", type="secondary"):
+                        cursor.execute("DELETE FROM payments WHERE id=?", (pid,))
+                        conn.commit()
+                        st.rerun()
 
-        # حذف پرداخت
-        if st.button("حذف پرداخت"):
-            cursor.execute("DELETE FROM payments WHERE id=?", (selected_pay_id,))
-            conn.commit()
-            st.success("پرداخت حذف شد ✅")
-            st.experimental_rerun()
+        st.dataframe(df_pay.style.format({"amount":"{:,}"}))
 
-        st.dataframe(df_pay)
-
-# ================== گزارش کلی ==================
+# ── تب ۳: گزارش کلی (بخش مشکل‌دار - کاملاً اصلاح شد) ───────
 with tab3:
-    st.header("گزارش کلی ساختمان")
+    st.header("گزارش کلی")
 
-    df_all_exp = pd.read_sql_query("SELECT * FROM expenses", conn)
-    df_all_pay = pd.read_sql_query("SELECT * FROM payments", conn)
+    df_exp = pd.read_sql("SELECT month, SUM(amount) as total FROM expenses GROUP BY month", conn)
+    df_pay = pd.read_sql("SELECT unit, month, SUM(amount) as paid FROM payments GROUP BY unit, month", conn)
 
-    total_expense = df_all_exp["amount"].sum() if not df_all_exp.empty else 0
-    total_paid = df_all_pay["amount"].sum() if not df_all_pay.empty else 0
+    total_exp_all = df_exp["total"].sum() if not df_exp.empty else 0
+    total_paid_all = df_pay["paid"].sum() if not df_pay.empty else 0
+    balance_all = total_paid_all - total_exp_all
 
-    share_year = total_expense / NUM_UNITS if total_expense > 0 else 0
-
-    # جدول پرداخت سالانه
-    if not df_all_pay.empty:
-        pivot = df_all_pay.pivot_table(
-            index="unit",
-            columns="month",
-            values="amount",
-            aggfunc="sum",
-            fill_value=0
-        )
-        pivot["جمع پرداخت"] = pivot.sum(axis=1)
-        pivot["مانده"] = pivot["جمع پرداخت"] - share_year
-
-        st.subheader("💳 وضعیت پرداخت‌ها")
-        st.dataframe(pivot)
-
-    st.divider()
-
-    st.subheader("🧾 وضعیت هزینه‌ها")
-    if not df_all_exp.empty:
-        expense_summary = df_all_exp.groupby("month")["amount"].sum().reset_index()
-        st.dataframe(expense_summary)
-
-    st.divider()
-
-    st.subheader("🏦 وضعیت صندوق")
-    balance = total_paid - total_expense
-
-    st.write(f"مجموع هزینه‌ها: {total_expense:,.0f}")
-    st.write(f"مجموع پرداخت‌ها: {total_paid:,.0f}")
-
-    if balance >= 0:
-        st.success(f"موجودی صندوق: {balance:,.0f}")
+    if df_exp.empty:
+        st.info("هنوز هزینه‌ای ثبت نشده است.")
+        df_balance = pd.DataFrame(index=UNIT_NAMES, columns=MONTHS + ["مانده کل"]).fillna(0)
     else:
-        st.error(f"کسری صندوق: {balance:,.0f}")
+        # سهم هر واحد در هر ماه
+        monthly_share = df_exp.set_index("month")["total"] / NUM_UNITS
 
+        # سری تجمعی هزینه (برای همه واحدها یکسان)
+        cum_exp = monthly_share.reindex(MONTHS).cumsum().fillna(method="ffill").fillna(0)
+
+        # جدول پرداخت‌ها
+        pay_table = df_pay.pivot(index="unit", columns="month", values="paid") \
+                          .reindex(index=UNIT_NAMES, columns=MONTHS).fillna(0)
+
+        cum_pay = pay_table.cumsum(axis=1)
+
+        # مانده = پرداخت تجمعی - هزینه تجمعی
+        df_balance = cum_pay.subtract(cum_exp, axis=1)
+        df_balance["مانده کل"] = df_balance.sum(axis=1)
+
+    st.subheader("مانده هر واحد (تجمعی)")
+    st.dataframe(
+        df_balance.style
+          .format("{:,.0f}")
+          .background_gradient(cmap="RdYlGn_r", axis=None, vmin=-10000000, vmax=10000000),
+        use_container_width=True
+    )
+
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("کل هزینه‌ها", f"{total_exp_all:,.0f} تومان")
+    c2.metric("کل دریافتی",  f"{total_paid_all:,.0f} تومان")
+    if balance_all >= 0:
+        c3.metric("موجودی", f"{balance_all:,.0f} تومان")
+    else:
+        c3.metric("کسری", f"{balance_all:,.0f} تومان", delta_color="inverse")
+
+st.caption("نسخه اصلاح‌شده — بدون KeyError")
