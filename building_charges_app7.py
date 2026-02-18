@@ -2,9 +2,8 @@
 
 import streamlit as st
 import pandas as pd
-import psycopg2
+from supabase import create_client
 import os
-import socket
 
 st.set_page_config(page_title="مدیریت شارژ ساختمان", layout="wide")
 st.title("💰 سیستم مدیریت شارژ ساختمان")
@@ -16,13 +15,10 @@ MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرد�
           "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
 
 # اتصال به دیتابیس
-# Force IPv4
-socket.AF_INET = socket.AF_INET6
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
-conn = psycopg2.connect(DATABASE_URL)
-cursor = conn.cursor()
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ایجاد جدول‌ها
 cursor.executescript("""
@@ -213,4 +209,5 @@ with tab3:
         c3.metric("کسری", f"{balance_all:,.0f} تومان", delta_color="inverse")
 
 st.caption("نسخه اصلاح‌شده — بدون KeyError")
+
 
